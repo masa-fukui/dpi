@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"syscall"
 
 	"github.com/spf13/cobra"
 )
@@ -137,7 +140,38 @@ func ensureDuckDBBinary() error {
 	return nil
 }
 
+// setupSignalHandler sets up signal handling for graceful cleanup.
+// It returns a cleanup function that should be deferred.
+func setupSignalHandler() func() {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// Track whether we received a signal (using atomic for thread-safety)
+	var signalReceived atomic.Bool
+
+	// Start goroutine to handle signals
+	go func() {
+		sig := <-sigChan
+		signalReceived.Store(true)
+		fmt.Fprintf(os.Stderr, "\nReceived signal %v, waiting for DuckDB to exit...\n", sig)
+		// Don't exit here - let DuckDB handle the signal and exit naturally
+		// This allows our defer statements to run for cleanup
+	}()
+
+	// Return cleanup function
+	return func() {
+		if signalReceived.Load() {
+			fmt.Fprintln(os.Stderr, "Cleanup completed, exiting")
+			os.Exit(130) // Exit code 130 is conventional for SIGINT (128 + 2)
+		}
+	}
+}
+
 func runCommand(cmd *cobra.Command, args []string) {
+	// Set up signal handler early to ensure cleanup happens even if interrupted
+	cleanupSignalHandler := setupSignalHandler()
+	defer cleanupSignalHandler()
+
 	fmt.Fprintln(os.Stdout, "============== Initial dpi setup ==============")
 
 	filePath := args[0]
