@@ -21,10 +21,13 @@ Examples:
   dpi data.parquet
   dpi *.parquet
   dpi data.csv
-  dpi -s data.csv     # With strict mode for CSV
+  dpi -s data.csv          # With strict mode for CSV
+  dpi -a data.parquet      # Read all columns as VARCHAR
+  dpi -a -s data.csv       # Combined flags
 
 Flags:
-  -h, --help      help for dpi
-  -s, --strict    Enable strict mode (for CSV files)
-  -v, --version   version for dpi
+  -a, --all-varchar   Read all columns as VARCHAR (disable type detection)
+  -h, --help          help for dpi
+  -s, --strict        Enable strict mode (for CSV files)
+  -v, --version       version for dpi
 ```

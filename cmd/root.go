@@ -40,13 +40,16 @@ var rootCmd = &cobra.Command{
 	Example: `  dpi data.parquet
   dpi *.parquet
   dpi data.csv
-  dpi -s data.csv     # With strict mode for CSV`,
+  dpi -s data.csv          # With strict mode for CSV
+  dpi -a data.parquet      # Read all columns as VARCHAR
+  dpi -a -s data.csv       # Combined flags`,
 	Args: cobra.ExactArgs(1),
 	Run:  runCommand,
 }
 
 func init() {
 	rootCmd.Flags().BoolP("strict", "s", false, "Enable strict mode (for CSV files)")
+	rootCmd.Flags().BoolP("all-varchar", "a", false, "Read all columns as VARCHAR (disable type detection)")
 }
 
 func Execute() {
@@ -81,16 +84,26 @@ func determineFileFormat(filename string) FileFormat {
 	}
 }
 
-func createTemporaryTable(filename FileNameString, tempDir string, fileFormat FileFormat, strict bool) error {
+func createTemporaryTable(filename FileNameString, tempDir string, fileFormat FileFormat, strict bool, allVarchar bool) error {
 	var query string
 
 	switch fileFormat {
 	case Parquet:
-		query = fmt.Sprintf(`CREATE TABLE %s AS SELECT * FROM read_parquet([%s]);`,
-			TableName, filename)
+		if allVarchar {
+			query = fmt.Sprintf(`CREATE TABLE %s AS SELECT COLUMNS(*):VARCHAR FROM read_parquet([%s]);`,
+				TableName, filename)
+		} else {
+			query = fmt.Sprintf(`CREATE TABLE %s AS SELECT * FROM read_parquet([%s]);`,
+				TableName, filename)
+		}
 	case CSV:
-		query = fmt.Sprintf(`CREATE TABLE %s AS SELECT * FROM read_csv(%s, strict_mode=%v);`,
-			TableName, filename, strict)
+		if allVarchar {
+			query = fmt.Sprintf(`CREATE TABLE %s AS SELECT * FROM read_csv(%s, strict_mode=%v, all_varchar=true);`,
+				TableName, filename, strict)
+		} else {
+			query = fmt.Sprintf(`CREATE TABLE %s AS SELECT * FROM read_csv(%s, strict_mode=%v);`,
+				TableName, filename, strict)
+		}
 	default:
 		return fmt.Errorf("unsupported file format: %s", fileFormat)
 	}
@@ -176,6 +189,7 @@ func runCommand(cmd *cobra.Command, args []string) {
 
 	filePath := args[0]
 	strict := cmd.Flag("strict").Value.String() == "true"
+	allVarchar := cmd.Flag("all-varchar").Value.String() == "true"
 
 	// Determine file format
 	fileFormat := determineFileFormat(filePath)
@@ -199,7 +213,7 @@ func runCommand(cmd *cobra.Command, args []string) {
 	}
 
 	// Create temporary table
-	if err := createTemporaryTable(filename, tempDir, fileFormat, strict); err != nil {
+	if err := createTemporaryTable(filename, tempDir, fileFormat, strict, allVarchar); err != nil {
 		exitWithError("Creating temporary table failed: %v", err)
 	}
 	fmt.Fprintln(os.Stdout, "Temporary table created successfully")
